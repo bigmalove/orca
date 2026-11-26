@@ -9,6 +9,10 @@ import { serifFontFamily } from '../../../theme/mobile-serif-font'
 import { CHAT_PROSE_SCALE } from '../transcript/messages/mobile-native-chat-message-styles'
 
 export const NATIVE_CHAT_TEXT_KEY = 'orca:nativeChatText'
+// Saves before serif became the default wrote `font: 'system'` with any size change; only a save marked
+// with this version means the reader picked System. An unmarked one (an older build, or a pinch on a page
+// an older host served) keeps the font already held.
+const SETTINGS_VERSION = 2
 
 export type NativeChatFont = 'system' | 'serif' | 'mono'
 export type NativeChatLineSpacing = 'compact' | 'default' | 'relaxed'
@@ -36,7 +40,7 @@ export function defaultNativeChatTextSettings(): NativeChatTextSettings {
   const tablet = getResponsiveLayoutMetrics(screen.width, screen.height).isTabletLayout
   return {
     size: tablet ? TABLET_TEXT_SIZE : BASE_TEXT_SIZE,
-    font: 'system',
+    font: 'serif',
     lineSpacing: 'default'
   }
 }
@@ -63,11 +67,17 @@ function parseSettings(raw: string | null): NativeChatTextSettings | null {
   }
   const size = 'size' in parsed ? parsed.size : undefined
   const font = 'font' in parsed ? parsed.font : undefined
+  const pickedSystem = 'v' in parsed && parsed.v === SETTINGS_VERSION
   const lineSpacing = 'lineSpacing' in parsed ? parsed.lineSpacing : undefined
   const fallback = defaultNativeChatTextSettings()
   return {
     size: typeof size === 'number' ? clampNativeChatTextSize(size) : fallback.size,
-    font: font === 'system' || font === 'serif' || font === 'mono' ? font : fallback.font,
+    font:
+      font === 'serif' || font === 'mono' || (font === 'system' && pickedSystem)
+        ? font
+        : font === 'system' && snapshot.stored
+          ? snapshot.settings.font
+          : fallback.font,
     lineSpacing:
       lineSpacing === 'compact' || lineSpacing === 'default' || lineSpacing === 'relaxed'
         ? lineSpacing
@@ -79,7 +89,7 @@ type Snapshot = { settings: NativeChatTextSettings; stored: boolean }
 
 // The phone default until the first storage read, which measures the screen; importing never does.
 let snapshot: Snapshot = {
-  settings: { size: BASE_TEXT_SIZE, font: 'system', lineSpacing: 'default' },
+  settings: { size: BASE_TEXT_SIZE, font: 'serif', lineSpacing: 'default' },
   stored: false
 }
 // A change made while a read is in flight wins over that older read.
@@ -153,7 +163,10 @@ function persist(settings: NativeChatTextSettings | null): Promise<void> {
   adopt(settings)
   // Queue writes so a slower earlier save cannot land after a newer one.
   const write = writes.then(() =>
-    persistMirrored(NATIVE_CHAT_TEXT_KEY, settings === null ? null : JSON.stringify(settings))
+    persistMirrored(
+      NATIVE_CHAT_TEXT_KEY,
+      settings === null ? null : JSON.stringify({ ...settings, v: SETTINGS_VERSION })
+    )
   )
   // A failed save shows what storage still holds, unless a newer change is on its way.
   writes = write.catch(() => {
@@ -211,16 +224,24 @@ export function nativeChatFontFamily(font: NativeChatFont): string | undefined {
   return font === 'serif' ? serifFontFamily : font === 'mono' ? typography.monoFamily : undefined
 }
 
-/** Markdown props for message prose: the chat's larger prose scale, the chosen face and spacing. */
-export function useNativeChatProseText(fontScale: number): {
+// The serif reads a size smaller than the system face, so replies set in it take 17 pt at the default size.
+const SERIF_PROSE_SCALE = 17 / 13
+
+/** Markdown props for message prose: the chat's larger prose scale, the chosen face and spacing.
+ *  The face is for agent replies; your own messages keep the system face, as the composer does. */
+export function useNativeChatProseText(
+  fontScale: number,
+  mine = false
+): {
   textScale: number
   fontFamily: string | undefined
   lineSpacing: number
 } {
   const { font, lineSpacing } = useNativeChatTextSettings()
+  const face = mine ? 'system' : font
   return {
-    textScale: CHAT_PROSE_SCALE * fontScale,
-    fontFamily: nativeChatFontFamily(font),
+    textScale: (face === 'serif' ? SERIF_PROSE_SCALE : CHAT_PROSE_SCALE) * fontScale,
+    fontFamily: nativeChatFontFamily(face),
     lineSpacing: LINE_SPACING[lineSpacing]
   }
 }

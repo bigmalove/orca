@@ -24,7 +24,7 @@ export const queuedMessageStyles = themedStyleSheet(() => ({
   },
   box: {
     paddingBottom: COMPOSER_TUCK,
-    backgroundColor: colors.bgPanel,
+    backgroundColor: colors.chatPanel,
     borderTopLeftRadius: radii.surface,
     borderTopRightRadius: radii.surface,
     borderWidth: StyleSheet.hairlineWidth,
